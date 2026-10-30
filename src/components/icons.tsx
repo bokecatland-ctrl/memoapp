@@ -75,3 +75,21 @@ export function LogoutIcon({ size = 20 }: Props) {
     </svg>
   );
 }
+
+export function MicIcon({ size = 28 }: Props) {
+  return (
+    <svg {...base} width={size} height={size}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+    </svg>
+  );
+}
+
+export function StopIcon({ size = 24 }: Props) {
+  return (
+    <svg {...base} width={size} height={size} fill="currentColor">
+      <rect x="7" y="7" width="10" height="10" rx="2" />
+    </svg>
+  );
+}

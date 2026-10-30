@@ -9,12 +9,14 @@ import { ThemeSwitch } from './components/ThemeSwitch';
 import { Toast, type ToastData } from './components/Toast';
 import { LogoutIcon } from './components/icons';
 import { ALL_CATEGORIES, CATEGORIES } from './lib/categories';
-import { formatDayWithWeekday, toISODate } from './lib/dates';
+import { formatDayWithWeekday, formatShortDate, toISODate } from './lib/dates';
 import type { MemoStore } from './lib/memoStore';
+import { classify, detectDue } from './lib/parse';
 import { countFor, dueBand, listFor, pinnedMemos, type Tab } from './lib/selectors';
 import { KEYS, load, save } from './lib/storage';
 import { applyTheme, loadTheme, type ThemeMode } from './lib/theme';
-import type { Category, Memo, MemoPatch } from './lib/types';
+import type { Category, Memo, MemoPatch, Source } from './lib/types';
+import { useSpeech } from './lib/useSpeech';
 
 const TABS: Tab[] = ['all', ...ALL_CATEGORIES, 'finished'];
 
@@ -81,10 +83,24 @@ export function App({ store, account }: Props) {
   );
   const editing = editingId ? memos.find((m) => m.id === editingId) ?? null : null;
 
-  const addMemo = async (body: string, category: Category) => {
-    const memo = await store.add({ body, category });
-    notify(`${CATEGORIES[category].label}に保存しました`, () => store.remove(memo.id));
+  /** 色ボタンで選んだときはそのカテゴリ、選んでいなければ先頭のキーワードで分ける */
+  const addMemo = async (text: string, chosen: Category | null, source: Source = 'text') => {
+    const { category, body } = chosen ? { category: chosen, body: text } : classify(text);
+    // 期限のあるカテゴリ(やること・共有事項)だけ、「明日」などから期限の候補を入れる
+    const due_date = CATEGORIES[category].hasDue ? detectDue(body, new Date()) : null;
+    const memo = await store.add({ body, category, due_date, source });
+    const label = CATEGORIES[category].label;
+    const detail = due_date ? `(期限 ${formatShortDate(due_date)})` : '';
+    notify(
+      source === 'voice' ? `${label}${detail}:「${body}」` : `${label}に保存しました${detail}`,
+      () => store.remove(memo.id),
+    );
   };
+
+  const speech = useSpeech({
+    onFinal: (text) => void addMemo(text, null, 'voice'),
+    onError: (message) => notify(message),
+  });
 
   const finish = (memo: Memo) => {
     const info = CATEGORIES[memo.category];
@@ -96,8 +112,13 @@ export function App({ store, account }: Props) {
     onEdit: (m) => setEditingId(m.id),
     onFinish: finish,
     onSort: (m, c) => {
-      store.update(m.id, { category: c });
-      notify(`${CATEGORIES[c].label}に移しました`, () => store.update(m.id, { category: m.category }));
+      // やること・共有事項に移したときは、本文の「明日」などから期限の候補を入れる(書いた日を基準に)
+      const due_date = CATEGORIES[c].hasDue ? m.due_date ?? detectDue(m.body, new Date(m.created_at)) : null;
+      store.update(m.id, { category: c, due_date });
+      const detail = due_date ? `(期限 ${formatShortDate(due_date)})` : '';
+      notify(`${CATEGORIES[c].label}に移しました${detail}`, () =>
+        store.update(m.id, { category: m.category, due_date: m.due_date }),
+      );
     },
     onTogglePin: (m) => store.update(m.id, { pinned: !m.pinned }),
     onRestore: (m) => {
@@ -131,7 +152,11 @@ export function App({ store, account }: Props) {
       </header>
 
       <div className="input-area">
-        <QuickInput ref={inputRef} onSave={addMemo} />
+        <QuickInput
+          ref={inputRef}
+          onSave={(text, category) => void addMemo(text, category)}
+          voice={{ supported: speech.supported, listening: speech.listening, onStart: speech.start, onStop: speech.stop }}
+        />
       </div>
 
       <aside className="board">
@@ -154,7 +179,17 @@ export function App({ store, account }: Props) {
         )}
       </main>
 
-      <Toast toast={toast} onDone={clearToast} />
+      {speech.listening ? (
+        <div className="listening" role="status" aria-live="polite">
+          <span className="listening-dot" aria-hidden="true" />
+          <p className="listening-text">{speech.interim || '聞き取り中…(先頭に「やること」などと言うと分けられます)'}</p>
+          <button type="button" className="listening-cancel" onClick={speech.cancel}>
+            やめる
+          </button>
+        </div>
+      ) : (
+        <Toast toast={toast} onDone={clearToast} />
+      )}
 
       {editing && (
         <EditSheet
