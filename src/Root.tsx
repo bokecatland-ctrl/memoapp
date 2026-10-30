@@ -14,6 +14,17 @@ type Phase =
   | { kind: 'ready'; userId: string; email: string };
 
 const allowedKey = (userId: string) => `memoapp.allowed.${userId}`;
+const LAST_USER_KEY = 'memoapp.lastUser';
+
+/** 前回この端末で使った人(電波がないときに、ログインの確認を待たずに開くため) */
+function loadLastUser(): { userId: string; email: string } | null {
+  try {
+    const v = JSON.parse(load(LAST_USER_KEY) ?? 'null');
+    return v && typeof v.userId === 'string' && load(allowedKey(v.userId)) === '1' ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Supabase の設定がない開発環境では、端末保存版として動かす */
 export function Root() {
@@ -51,6 +62,7 @@ function CloudRoot() {
       if (cancelled || error) return; // 電波がないときは、これまでの判定のまま
       if (data === true) {
         save(allowedKey(userId), '1');
+        save(LAST_USER_KEY, JSON.stringify({ userId, email }));
         setPhase({ kind: 'ready', userId, email });
       } else {
         save(allowedKey(userId), null);
@@ -58,7 +70,13 @@ function CloudRoot() {
       }
     };
 
-    void sb.auth.getSession().then(({ data }) => handle(data.session));
+    // ログインの期限が切れていて電波がないと、確認に数十秒かかる。前回の人ですぐ開き、メモは未送信としてためる
+    const last = loadLastUser();
+    if (last) setPhase({ kind: 'ready', ...last });
+    void sb.auth.getSession().then(({ data, error }) => {
+      if (error && last) return; // 電波がない:そのまま使い、つながったら自動でログインを更新する
+      void handle(data.session);
+    });
     // ログイン・ログアウトのときだけ判定し直す(トークンの更新では何もしない)
     const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') void handle(session);
@@ -98,6 +116,7 @@ function CloudApp({ userId, email }: { userId: string; email: string }) {
     save(store.cacheKey, null);
     save(store.outboxKey, null);
     save(allowedKey(userId), null);
+    save(LAST_USER_KEY, null);
     await supabase!.auth.signOut();
   };
 

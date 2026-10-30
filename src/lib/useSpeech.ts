@@ -69,6 +69,8 @@ interface Session {
   earlier: string; // つなぎ直す前までの文字
   current: string;
   failed: boolean;
+  /** ホーム画面のショートカットから自動で始めたとき */
+  auto: boolean;
   silence?: ReturnType<typeof setTimeout>;
   max?: ReturnType<typeof setTimeout>;
 }
@@ -115,10 +117,10 @@ export function useSpeech({ onFinal, onError }: Options) {
     else if (!s.failed) handlers.current.onError(ERRORS['no-speech']);
   };
 
-  const start = useCallback(() => {
+  const begin = useCallback((auto: boolean) => {
     const Ctor = getCtor();
     if (!Ctor || sessionRef.current) return;
-    const s: Session = { rec: null, done: null, earlier: '', current: '', failed: false };
+    const s: Session = { rec: null, done: null, earlier: '', current: '', failed: false, auto };
     sessionRef.current = s;
     setListening(true);
     setInterim('');
@@ -143,7 +145,11 @@ export function useSpeech({ onFinal, onError }: Options) {
         // 話していない間のエラーは無視して待ち続ける(終わりは SILENCE_MS で決める)
         if (e.error === 'no-speech' || e.error === 'aborted') return;
         s.failed = true;
-        handlers.current.onError(ERRORS[e.error] ?? `音声入力でエラーが出ました(${e.error})`);
+        // ボタンを押さずに自動で始めると、ブラウザによっては許可されない。そのときはボタンを押してもらう
+        const autoBlocked = s.auto && (e.error === 'not-allowed' || e.error === 'service-not-allowed');
+        handlers.current.onError(
+          autoBlocked ? 'マイクボタンを押して話してください' : ERRORS[e.error] ?? `音声入力でエラーが出ました(${e.error})`,
+        );
         finish('save'); // そこまでに聞き取れた分は保存する
       };
       rec.onend = () => {
@@ -176,6 +182,10 @@ export function useSpeech({ onFinal, onError }: Options) {
     }
   }, [finish]);
 
+  const start = useCallback(() => begin(false), [begin]);
+  /** ホーム画面の「音声で記録」から開いたとき */
+  const startFromShortcut = useCallback(() => begin(true), [begin]);
+
   /** 聞き取りを終えて、そこまでの内容で保存する */
   const stop = useCallback(() => finish('save'), [finish]);
   /** 保存せずにやめる */
@@ -192,5 +202,5 @@ export function useSpeech({ onFinal, onError }: Options) {
     [],
   );
 
-  return { supported, listening, interim, start, stop, cancel };
+  return { supported, listening, interim, start, startFromShortcut, stop, cancel };
 }

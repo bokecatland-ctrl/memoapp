@@ -35,6 +35,15 @@ function useNow(): Date {
   return now;
 }
 
+/** ホーム画面のアイコン長押し →「音声で記録」から開いたか(開き直しで再び始まらないよう、URL からは消す) */
+const openedForVoice = (() => {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('voice') !== '1') return false;
+  url.searchParams.delete('voice');
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  return true;
+})();
+
 const EMPTY_MESSAGE: Record<Tab, string> = {
   all: 'メモはまだありません。下の欄に書いて保存してください',
   inbox: '受信箱は空です',
@@ -101,6 +110,10 @@ export function App({ store, account }: Props) {
     onFinal: (text) => void addMemo(text, null, 'voice'),
     onError: (message) => notify(message),
   });
+
+  useEffect(() => {
+    if (openedForVoice) speech.startFromShortcut();
+  }, [speech.startFromShortcut]);
 
   const finish = (memo: Memo) => {
     const info = CATEGORIES[memo.category];
