@@ -137,4 +137,19 @@ describe('CloudMemoStore', () => {
     await a.add({ body: 'A', category: 'inbox' });
     expect(new CloudMemoStore(api, 'u2', kv).getAll()).toEqual([]);
   });
+
+  it('削除して「取り消し」すると、同じ id・作成日時で戻る', async () => {
+    const { api, rows } = fakeApi();
+    const store = new CloudMemoStore(api, 'u1', memoryKV());
+    const memo = await store.add({ body: '間違えたメモ', category: 'todo' });
+    await store.flush();
+    await store.remove(memo.id);
+    await store.flush();
+    expect(rows.has(memo.id)).toBe(false);
+    expect(store.getAll()).toEqual([]);
+    await store.restore(memo);
+    await store.flush();
+    expect(rows.get(memo.id)).toMatchObject({ body: '間違えたメモ', created_at: memo.created_at });
+    expect(store.getAll().map((m) => m.id)).toEqual([memo.id]);
+  });
 });

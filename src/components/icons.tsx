@@ -93,3 +93,14 @@ export function StopIcon({ size = 24 }: Props) {
     </svg>
   );
 }
+
+export function TrashIcon({ size = 18 }: Props) {
+  return (
+    <svg {...base} width={size} height={size}>
+      <path d="M4 7h16" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+      <path d="M9 7V4h6v3" />
+    </svg>
+  );
+}

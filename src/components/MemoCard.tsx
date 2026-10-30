@@ -1,7 +1,7 @@
 import { CATEGORIES, SORTABLE } from '../lib/categories';
 import { dueState, formatRelative, formatShortDate } from '../lib/dates';
 import type { Category, Memo } from '../lib/types';
-import { ArchiveIcon, CheckIcon, PinIcon, UndoIcon } from './icons';
+import { ArchiveIcon, CheckIcon, PinIcon, TrashIcon, UndoIcon } from './icons';
 
 export interface CardActions {
   onEdit: (memo: Memo) => void;
@@ -9,6 +9,7 @@ export interface CardActions {
   onSort: (memo: Memo, category: Category) => void;
   onTogglePin: (memo: Memo) => void;
   onRestore: (memo: Memo) => void;
+  onDelete: (memo: Memo) => void;
 }
 
 interface Props extends CardActions {
@@ -29,7 +30,7 @@ function metaLine(memo: Memo, now: Date, today: string): string {
   return parts.join(' · ');
 }
 
-export function MemoCard({ memo, now, today, onEdit, onFinish, onSort, onTogglePin, onRestore }: Props) {
+export function MemoCard({ memo, now, today, onEdit, onFinish, onSort, onTogglePin, onRestore, onDelete }: Props) {
   const info = CATEGORIES[memo.category];
   const finished = memo.status !== 'active';
 
@@ -57,10 +58,16 @@ export function MemoCard({ memo, now, today, onEdit, onFinish, onSort, onToggleP
         )}
         <span className="spacer" />
         {finished ? (
-          <button type="button" className="icon-btn" onClick={() => onRestore(memo)}>
-            <UndoIcon />
-            <span>戻す</span>
-          </button>
+          <>
+            <button type="button" className="icon-btn" onClick={() => onDelete(memo)}>
+              <TrashIcon />
+              <span>削除</span>
+            </button>
+            <button type="button" className="icon-btn" onClick={() => onRestore(memo)}>
+              <UndoIcon />
+              <span>戻す</span>
+            </button>
+          </>
         ) : (
           <>
             <button

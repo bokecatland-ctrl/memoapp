@@ -137,6 +137,10 @@ export class CloudMemoStore implements MemoStore {
     this.enqueue({ kind: 'remove', id });
   }
 
+  async restore(memo: Memo): Promise<void> {
+    this.enqueue({ kind: 'insert', memo });
+  }
+
   /** 端末保存版で書いたメモをクラウドへ移す(id・作成日時はそのまま) */
   importMemos(memos: Memo[]): void {
     for (const memo of memos) this.outbox.push({ kind: 'insert', memo });

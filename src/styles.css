@@ -953,6 +953,11 @@ button {
   min-width: 120px;
 }
 
+.btn-danger {
+  color: var(--overdue-bg);
+  border-color: currentColor;
+}
+
 .text-btn {
   border: 0;
   background: transparent;

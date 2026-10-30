@@ -125,6 +125,11 @@ export function App({ store, account }: Props) {
       store.update(m.id, { status: 'active' });
       notify('一覧に戻しました', () => store.update(m.id, { status: m.status }));
     },
+    // 確認は出さず、すぐ消して「取り消し」で戻せるようにする
+    onDelete: (m) => {
+      store.remove(m.id);
+      notify(`削除しました:「${m.body}」`, () => store.restore(m));
+    },
   };
 
   const closeEdit = useCallback(() => setEditingId(null), []);
@@ -202,6 +207,10 @@ export function App({ store, account }: Props) {
           }}
           onRestore={() => {
             actions.onRestore(editing);
+            closeEdit();
+          }}
+          onDelete={() => {
+            actions.onDelete(editing);
             closeEdit();
           }}
           onClose={closeEdit}

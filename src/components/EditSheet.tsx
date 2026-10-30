@@ -8,10 +8,11 @@ interface Props {
   onSave: (patch: MemoPatch) => void;
   onFinish: () => void;
   onRestore: () => void;
+  onDelete: () => void;
   onClose: () => void;
 }
 
-export function EditSheet({ memo, onSave, onFinish, onRestore, onClose }: Props) {
+export function EditSheet({ memo, onSave, onFinish, onRestore, onDelete, onClose }: Props) {
   const [body, setBody] = useState(memo.body);
   const [category, setCategory] = useState<Category>(memo.category);
   const [due, setDue] = useState(memo.due_date ?? '');
@@ -113,6 +114,9 @@ export function EditSheet({ memo, onSave, onFinish, onRestore, onClose }: Props)
         </label>
 
         <footer className="sheet-foot">
+          <button type="button" className="btn btn-danger" onClick={onDelete}>
+            削除
+          </button>
           {finished ? (
             <button type="button" className="btn" onClick={onRestore}>
               一覧に戻す

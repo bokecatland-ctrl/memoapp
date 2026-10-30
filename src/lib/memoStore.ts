@@ -10,8 +10,10 @@ export interface MemoStore {
   subscribe(listener: () => void): () => void;
   add(input: NewMemo): Promise<Memo>;
   update(id: string, patch: MemoPatch): Promise<void>;
-  /** 保存直後の「取り消し」専用。それ以外は消さずに「済み」へ移す */
+  /** 削除(間違えて書いたものなど)。終わったものは消さずに「済み」へ移す */
   remove(id: string): Promise<void>;
+  /** 削除の「取り消し」。消したメモを id・作成日時ごと戻す */
+  restore(memo: Memo): Promise<void>;
   /** まだサーバーに送れていない変更の数(端末保存では常に 0) */
   getPendingCount(): number;
   /** 保存に失敗したときの知らせ(画面に出す文言) */
@@ -101,6 +103,10 @@ export class LocalMemoStore implements MemoStore {
 
   async remove(id: string): Promise<void> {
     this.commit(this.memos.filter((m) => m.id !== id));
+  }
+
+  async restore(memo: Memo): Promise<void> {
+    this.commit([memo, ...this.memos.filter((m) => m.id !== memo.id)]);
   }
 
   getPendingCount(): number {
