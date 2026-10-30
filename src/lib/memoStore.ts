@@ -12,6 +12,10 @@ export interface MemoStore {
   update(id: string, patch: MemoPatch): Promise<void>;
   /** 保存直後の「取り消し」専用。それ以外は消さずに「済み」へ移す */
   remove(id: string): Promise<void>;
+  /** まだサーバーに送れていない変更の数(端末保存では常に 0) */
+  getPendingCount(): number;
+  /** 保存に失敗したときの知らせ(画面に出す文言) */
+  onError(listener: (message: string) => void): () => void;
 }
 
 export interface KeyValue {
@@ -19,14 +23,36 @@ export interface KeyValue {
   set(key: string, value: string): void;
 }
 
-const browserKV: KeyValue = { get: load, set: save };
+export const browserKV: KeyValue = { get: load, set: save };
 
-function newId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+/** uuid v4(DB の id 列にそのまま入れられる形) */
+export function newId(): string {
+  // randomUUID は https でないと使えないので、なければ自分で作る
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-function parse(raw: string | null): Memo[] {
+export function buildMemo(input: NewMemo, at: string): Memo {
+  return {
+    id: newId(),
+    body: input.body,
+    category: input.category,
+    due_date: input.due_date ?? null,
+    share_to: input.share_to ?? null,
+    pinned: input.pinned ?? false,
+    status: 'active',
+    source: input.source ?? 'text',
+    created_at: at,
+    updated_at: at,
+  };
+}
+
+export function parse(raw: string | null): Memo[] {
   if (!raw) return [];
   try {
     const data = JSON.parse(raw);
@@ -63,19 +89,7 @@ export class LocalMemoStore implements MemoStore {
   }
 
   async add(input: NewMemo): Promise<Memo> {
-    const at = this.now().toISOString();
-    const memo: Memo = {
-      id: newId(),
-      body: input.body,
-      category: input.category,
-      due_date: input.due_date ?? null,
-      share_to: input.share_to ?? null,
-      pinned: input.pinned ?? false,
-      status: 'active',
-      source: input.source ?? 'text',
-      created_at: at,
-      updated_at: at,
-    };
+    const memo = buildMemo(input, this.now().toISOString());
     this.commit([memo, ...this.memos]);
     return memo;
   }
@@ -87,6 +101,14 @@ export class LocalMemoStore implements MemoStore {
 
   async remove(id: string): Promise<void> {
     this.commit(this.memos.filter((m) => m.id !== id));
+  }
+
+  getPendingCount(): number {
+    return 0;
+  }
+
+  onError(): () => void {
+    return () => {};
   }
 
   private commit(next: Memo[]): void {

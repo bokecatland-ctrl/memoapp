@@ -7,18 +7,14 @@ import { PinBoard } from './components/PinBoard';
 import { QuickInput } from './components/QuickInput';
 import { ThemeSwitch } from './components/ThemeSwitch';
 import { Toast, type ToastData } from './components/Toast';
+import { LogoutIcon } from './components/icons';
 import { ALL_CATEGORIES, CATEGORIES } from './lib/categories';
 import { formatDayWithWeekday, toISODate } from './lib/dates';
-import { LocalMemoStore } from './lib/memoStore';
+import type { MemoStore } from './lib/memoStore';
 import { countFor, dueBand, listFor, pinnedMemos, type Tab } from './lib/selectors';
 import { KEYS, load, save } from './lib/storage';
 import { applyTheme, loadTheme, type ThemeMode } from './lib/theme';
 import type { Category, Memo, MemoPatch } from './lib/types';
-
-const store = new LocalMemoStore();
-window.addEventListener('storage', (e) => {
-  if (e.key === KEYS.memos) store.reload();
-});
 
 const TABS: Tab[] = ['all', ...ALL_CATEGORIES, 'finished'];
 
@@ -47,11 +43,16 @@ const EMPTY_MESSAGE: Record<Tab, string> = {
   finished: '完了・アーカイブしたメモはここに残ります',
 };
 
-export function App() {
-  const memos = useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getAll(),
-  );
+interface Props {
+  store: MemoStore;
+  /** クラウド保存のとき(端末保存の開発モードでは無し) */
+  account?: { email: string; onSignOut: () => void };
+}
+
+export function App({ store, account }: Props) {
+  const subscribe = useCallback((cb: () => void) => store.subscribe(cb), [store]);
+  const memos = useSyncExternalStore(subscribe, () => store.getAll());
+  const pending = useSyncExternalStore(subscribe, () => store.getPendingCount());
   const now = useNow();
   const today = toISODate(now);
   const [tab, setTabState] = useState<Tab>(loadTab);
@@ -61,6 +62,7 @@ export function App() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => store.onError((message) => setToast({ id: Date.now(), message })), [store]);
 
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -115,7 +117,17 @@ export function App() {
       <header className="top">
         <h1>メモ</h1>
         <p className="top-date">{formatDayWithWeekday(now)}</p>
+        {pending > 0 && (
+          <span className="pending" title="電波がつながったら送ります">
+            未送信 {pending}
+          </span>
+        )}
         <ThemeSwitch mode={theme} onChange={setTheme} />
+        {account && (
+          <button type="button" className="icon-btn top-logout" aria-label={`ログアウト(${account.email})`} title={account.email} onClick={account.onSignOut}>
+            <LogoutIcon />
+          </button>
+        )}
       </header>
 
       <div className="input-area">

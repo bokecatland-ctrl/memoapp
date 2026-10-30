@@ -65,3 +65,13 @@ export function CloseIcon({ size = 20 }: Props) {
     </svg>
   );
 }
+
+export function LogoutIcon({ size = 20 }: Props) {
+  return (
+    <svg {...base} width={size} height={size}>
+      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+      <path d="M10 8l-4 4 4 4" />
+      <path d="M6 12h10" />
+    </svg>
+  );
+}
