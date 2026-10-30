@@ -33,8 +33,45 @@ const ERRORS: Record<string, string> = {
   'not-allowed': 'マイクの使用が許可されていません。ブラウザの設定で許可してください',
   'service-not-allowed': 'マイクの使用が許可されていません。ブラウザの設定で許可してください',
   'audio-capture': 'マイクが見つかりません',
-  network: '音声認識につながりませんでした。電波の良いところで試すか、文字で入力してください',
+  network: '音声入力は電波が必要です。電波の良いところで試すか、文字で入力してください',
 };
+
+/** この時間なにも話さなければ、そこまでの内容で保存する(考えている間に止まらないように長めに) */
+export const SILENCE_MS = 10_000;
+/** 1回の聞き取りの上限 */
+const MAX_MS = 120_000;
+
+/**
+ * 今の聞き取りの文字。Android の Chrome は確定した文を少しずつ伸ばしながら
+ * 何度も送ってくることがあるので、前の文で始まる文はつなげずに置き換える
+ */
+export function transcriptOf(results: ArrayLike<RecognitionResult>): string {
+  const finals: string[] = [];
+  let pending = '';
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const t = r[0].transcript;
+    if (!r.isFinal) {
+      pending += t;
+      continue;
+    }
+    const last = finals[finals.length - 1];
+    if (last !== undefined && t.startsWith(last)) finals[finals.length - 1] = t;
+    else finals.push(t);
+  }
+  return finals.join('') + pending;
+}
+
+interface Session {
+  rec: Recognition | null;
+  /** 終わり方が決まったら入る。決まる前にブラウザが止めたときは、つなぎ直して続ける */
+  done: 'save' | 'cancel' | null;
+  earlier: string; // つなぎ直す前までの文字
+  current: string;
+  failed: boolean;
+  silence?: ReturnType<typeof setTimeout>;
+  max?: ReturnType<typeof setTimeout>;
+}
 
 interface Options {
   /** 話し終わって文字になったとき */
@@ -42,71 +79,118 @@ interface Options {
   onError: (message: string) => void;
 }
 
-/** 1回話すと自動で止まり、onFinal に文字を渡す */
 export function useSpeech({ onFinal, onError }: Options) {
   const [supported] = useState(() => getCtor() !== null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
-  const recRef = useRef<Recognition | null>(null);
+  const sessionRef = useRef<Session | null>(null);
   // 最新のコールバックを使う(聞き取り中に画面が書き換わっても古いものを呼ばない)
   const handlers = useRef({ onFinal, onError });
   handlers.current = { onFinal, onError };
 
-  const start = useCallback(() => {
-    const Ctor = getCtor();
-    if (!Ctor || recRef.current) return;
-    const rec = new Ctor();
-    rec.lang = 'ja-JP';
-    rec.interimResults = true;
-    rec.continuous = false;
-    rec.maxAlternatives = 1;
-
-    let finalText = '';
-    let latest = '';
-    let cancelled = false;
-    rec.onresult = (e) => {
-      let pending = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) finalText += r[0].transcript;
-        else pending += r[0].transcript;
-      }
-      latest = finalText + pending;
-      setInterim(latest);
-    };
-    rec.onerror = (e) => {
-      if (e.error === 'aborted') {
-        cancelled = true;
-        return;
-      }
-      handlers.current.onError(ERRORS[e.error] ?? `音声入力でエラーが出ました(${e.error})`);
-    };
-    rec.onend = () => {
-      recRef.current = null;
-      setListening(false);
-      setInterim('');
-      // 途中で止めたときは、確定前の文字も使う
-      const text = (finalText || latest).trim();
-      if (text && !cancelled) handlers.current.onFinal(text);
-    };
-
-    recRef.current = rec;
-    setListening(true);
-    try {
-      rec.start();
-    } catch {
-      recRef.current = null;
-      setListening(false);
-      handlers.current.onError('音声入力を始められませんでした');
+  const finish = useCallback((how: 'save' | 'cancel') => {
+    const s = sessionRef.current;
+    if (!s || s.done) return;
+    s.done = how;
+    clearTimeout(s.silence);
+    clearTimeout(s.max);
+    if (s.rec) {
+      // 止めると onend が呼ばれ、そこで保存する
+      if (how === 'cancel') s.rec.abort();
+      else s.rec.stop();
+    } else {
+      close(s);
     }
   }, []);
 
-  /** 聞き取りを終えて、そこまでの内容で保存する */
-  const stop = useCallback(() => recRef.current?.stop(), []);
-  /** 保存せずにやめる */
-  const cancel = useCallback(() => recRef.current?.abort(), []);
+  const close = (s: Session) => {
+    clearTimeout(s.silence);
+    clearTimeout(s.max);
+    if (sessionRef.current === s) sessionRef.current = null;
+    setListening(false);
+    setInterim('');
+    if (s.done !== 'save') return;
+    const text = (s.earlier + s.current).trim();
+    if (text) handlers.current.onFinal(text);
+    else if (!s.failed) handlers.current.onError(ERRORS['no-speech']);
+  };
 
-  useEffect(() => () => recRef.current?.abort(), []);
+  const start = useCallback(() => {
+    const Ctor = getCtor();
+    if (!Ctor || sessionRef.current) return;
+    const s: Session = { rec: null, done: null, earlier: '', current: '', failed: false };
+    sessionRef.current = s;
+    setListening(true);
+    setInterim('');
+
+    const armSilence = () => {
+      clearTimeout(s.silence);
+      s.silence = setTimeout(() => finish('save'), SILENCE_MS);
+    };
+
+    const listen = () => {
+      const rec = new Ctor();
+      rec.lang = 'ja-JP';
+      rec.interimResults = true;
+      rec.continuous = true;
+      rec.maxAlternatives = 1;
+      rec.onresult = (e) => {
+        s.current = transcriptOf(e.results);
+        setInterim(s.earlier + s.current);
+        if (!s.done) armSilence();
+      };
+      rec.onerror = (e) => {
+        // 話していない間のエラーは無視して待ち続ける(終わりは SILENCE_MS で決める)
+        if (e.error === 'no-speech' || e.error === 'aborted') return;
+        s.failed = true;
+        handlers.current.onError(ERRORS[e.error] ?? `音声入力でエラーが出ました(${e.error})`);
+        finish('save'); // そこまでに聞き取れた分は保存する
+      };
+      rec.onend = () => {
+        s.rec = null;
+        if (s.done) {
+          close(s);
+          return;
+        }
+        // まだ終わっていないのにブラウザが止めた:そこまでの文字を残して、つなぎ直す
+        s.earlier += s.current;
+        s.current = '';
+        try {
+          listen();
+        } catch {
+          finish('save');
+        }
+      };
+      s.rec = rec;
+      rec.start();
+    };
+
+    armSilence();
+    s.max = setTimeout(() => finish('save'), MAX_MS);
+    try {
+      listen();
+    } catch {
+      s.failed = true;
+      handlers.current.onError('音声入力を始められませんでした');
+      finish('cancel');
+    }
+  }, [finish]);
+
+  /** 聞き取りを終えて、そこまでの内容で保存する */
+  const stop = useCallback(() => finish('save'), [finish]);
+  /** 保存せずにやめる */
+  const cancel = useCallback(() => finish('cancel'), [finish]);
+
+  useEffect(
+    () => () => {
+      const s = sessionRef.current;
+      if (s) {
+        s.done = 'cancel';
+        s.rec?.abort();
+      }
+    },
+    [],
+  );
 
   return { supported, listening, interim, start, stop, cancel };
 }

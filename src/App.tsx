@@ -187,7 +187,7 @@ export function App({ store, account }: Props) {
       {speech.listening ? (
         <div className="listening" role="status" aria-live="polite">
           <span className="listening-dot" aria-hidden="true" />
-          <p className="listening-text">{speech.interim || '聞き取り中…(先頭に「やること」などと言うと分けられます)'}</p>
+          <p className="listening-text">{speech.interim || '聞き取り中…話し終わったら■で保存(10秒話さないと自動で保存)'}</p>
           <button type="button" className="listening-cancel" onClick={speech.cancel}>
             やめる
           </button>
